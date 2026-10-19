@@ -20,6 +20,7 @@ type Config struct {
 	Mirroring  Mirroring  `koanf:"mirroring"`
 	Monitoring Monitoring `koanf:"monitoring"`
 	Metrics    Metrics    `koanf:"metrics"`
+	TLS        TLS        `koanf:"-"` // stub: not loaded yet
 }
 
 type Routing struct {
@@ -73,6 +74,25 @@ type RegistryMonitoring struct {
 // an enabled default for this specific registry), *true = enabled.
 func (r *RegistryMonitoring) ResolveDigestEnabled() bool {
 	return r.ResolveDigest != nil && *r.ResolveDigest
+}
+
+// TLS holds the TLS settings of the requests kuik sends to registries.
+type TLS struct {
+	// Default applies to every host; it only takes CASecretRef.
+	Default TLSEntry `koanf:"default"`
+	// Items are keyed by registry host, lowercase host[:port].
+	Items map[string]TLSEntry `koanf:"items"`
+}
+
+type TLSEntry struct {
+	CASecretRef *CASecretRef `koanf:"caSecretRef"`
+	Insecure    bool         `koanf:"insecure"`
+}
+
+type CASecretRef struct {
+	Namespace string `koanf:"namespace"`
+	Name      string `koanf:"name"`
+	Key       string `koanf:"key"`
 }
 
 type Metrics struct {
