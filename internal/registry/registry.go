@@ -50,11 +50,7 @@ func NewClient() *Client {
 }
 
 func (c *Client) newTransportOption() remote.Option {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if c.tls != nil && c.tls.dialContext != nil {
-		transport.DialContext = c.tls.dialContext
-	}
-	c.headerCapture.roundTripper = transport
+	c.headerCapture.roundTripper = newTLSRouter(c.tls)
 
 	return remote.WithTransport(c.headerCapture)
 }
@@ -88,6 +84,12 @@ func (c *Client) Execute(imageName string, action func(ref name.Reference, opts 
 	sourceRef, err := name.ParseReference(imageName)
 	if err != nil {
 		return err
+	}
+	if c.tls.insecure(sourceRef.Context().RegistryStr()) {
+		// tries HTTPS, then falls back to plain HTTP
+		if sourceRef, err = name.ParseReference(imageName, name.Insecure); err != nil {
+			return err
+		}
 	}
 
 	ctx := context.Background()
@@ -216,11 +218,8 @@ func (c *Client) DeleteImage(imageName string) error {
 			return err
 		}
 
-		digest, err := name.NewDigest(ref.Name()+"@"+descriptor.Digest.String(), name.Insecure)
-		if err != nil {
-			return err
-		}
-		return remote.Delete(digest, opts...)
+		// keeps the scheme options of ref: plain HTTP only for an insecure host
+		return remote.Delete(ref.Context().Digest(descriptor.Digest.String()), opts...)
 	})
 }
 
