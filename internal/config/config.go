@@ -20,7 +20,7 @@ type Config struct {
 	Mirroring  Mirroring  `koanf:"mirroring"`
 	Monitoring Monitoring `koanf:"monitoring"`
 	Metrics    Metrics    `koanf:"metrics"`
-	TLS        TLS        `koanf:"-"` // stub: not loaded yet
+	TLS        TLS        `koanf:"tls"`
 }
 
 type Routing struct {
@@ -149,7 +149,7 @@ var defaultConfig = Config{
 }
 
 func (c *Config) Validate() error {
-	return validator.New().Struct(c)
+	return errors.Join(validator.New().Struct(c), c.TLS.validate())
 }
 
 func LoadDefault() (*Config, error) {
@@ -181,11 +181,17 @@ func load(provider koanf.Provider, parser koanf.Parser) (*Config, error) {
 
 	config := &Config{}
 
-	return config, k.UnmarshalWithConf("", config, koanf.UnmarshalConf{
+	if err := k.UnmarshalWithConf("", config, koanf.UnmarshalConf{
 		DecoderConfig: &mapstructure.DecoderConfig{
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
 				mapstructure.StringToTimeDurationHookFunc(),
 			),
 		},
-	})
+	}); err != nil {
+		return config, err
+	}
+
+	config.TLS.setDefaults()
+
+	return config, nil
 }
