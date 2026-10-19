@@ -64,6 +64,8 @@ metrics:
       start: 1
       factor: 1.94
       # min, max, custom: see "legacy" section below
+
+tls: {}               # no entry: every registry is verified against the system trust store
 ```
 
 ## `routing`
@@ -222,4 +224,49 @@ metrics:
     legacy:
       bucketType: custom
       custom: [1, 15, 60, 240, 720, 1440]
+```
+
+## `tls`
+
+TLS settings of every request the manager sends to a registry: the availability checks of the webhook, the `ClusterImageSetAvailability` monitoring, and the copies (source and destination) and deletions of `ImageSetMirror` and `ClusterImageSetMirror`. CRDs do not change: the entry of an image's registry host applies.
+
+`tls.default` applies to every host. `tls.items.<host>` applies to one host.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `caSecretRef.namespace` | string | required | Namespace of the Secret holding the CA bundle. |
+| `caSecretRef.name` | string | required | Name of the Secret. |
+| `caSecretRef.key` | string | `ca.crt` | Key of the Secret holding the PEM bundle of CA certificates. |
+| `insecure` | bool | `false` | Items only. Tries HTTPS without verifying the certificate (neither its chain nor its name), then falls back to plain HTTP. |
+
+### Rules
+
+- A key matches a registry host exactly, port included: `registry.lab.tld` does not match `registry.lab.tld:5000`, as containerd's and CRI-O's `certs.d/<host:port>` directories do. Keys are lowercase `host[:port]`, with no scheme and no path. Use `docker.io` for Docker Hub: it covers the registry host `index.docker.io` only. Docker Hub's token server (`auth.docker.io`) and blob CDN are other hosts, so the CA of a TLS-inspecting proxy belongs in `default`.
+- `caSecretRef` adds its CAs to the system trust store. The CAs of `default` and of the host add up: a host is verified against the system store, the `default` CA and its own CA.
+- A host with `insecure: true` verifies nothing, whatever `default` holds.
+- A host with its own `caSecretRef` is never reached over plain HTTP. A host without an entry keeps go-containerregistry's behaviour: plain HTTP is tried for `localhost`, loopback and private (RFC 1918) addresses.
+- `default` only takes `caSecretRef`; `insecure` in `default` is invalid. `caSecretRef` and `insecure` are exclusive in an entry. An invalid `tls` block makes the manager refuse to start.
+- A redirect (blob storage, CDN) and a token server get the entry of the host they go to, not the one of the registry.
+- A CA Secret that is missing, lacks its key, or holds no valid PEM certificate does not stop the manager: every request to the hosts it applies to fails before it is sent, and the image is reported unreachable with a message naming the Secret and the problem. kuik never falls back to a weaker verification.
+- A change of a CA Secret applies without a restart. A change of `tls` itself needs a restart, as the rest of this file.
+
+> [!IMPORTANT]
+> kuik never configures the nodes. The container runtime of each node (containerd, CRI-O) must trust the same registries on its own, or pods rewritten to them cannot pull.
+
+### Example
+
+```yaml
+tls:
+  default:                   # every host, e.g. the CA of a TLS-inspecting corporate proxy
+    caSecretRef:
+      namespace: kuik-system
+      name: corporate-ca
+      key: ca.crt            # Default: ca.crt, a PEM bundle
+  items:
+    harbor.corp.tld:         # trusts harbor-ca in addition to corporate-ca
+      caSecretRef:
+        namespace: kuik-system
+        name: harbor-ca
+    registry.lab.tld:5000:   # self-signed certificate, or plain HTTP
+      insecure: true
 ```
